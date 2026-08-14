@@ -16,79 +16,146 @@ workflows.
 - Lower context-compaction thresholds for long sessions
 - Direct access to a locally built harness for custom plugin development
 
-## Project Layout
+## Assumed Project Layout
+
+The paths below use placeholders. Replace them with your own locations.
 
 ```text
-D:\tools\ds-harness\
-  app-v0.1.10\                 # Prebuilt dsh-launcher release used as the desktop shell
-  deepseek-harness-master\     # Locally built DeepSeek Harness source
-  dsHarness-secondary development\ # Development notes and earlier launcher experiments
+<PROJECT_ROOT>\
+  launcher\                  # Prebuilt dsh-launcher release used as the desktop shell
+  harness\                   # Locally built DeepSeek Harness source
+  notes\                     # Optional development notes
 ```
 
-## Quick Start
+For example:
 
-Build and run the local harness from source:
+```text
+<PROJECT_ROOT>      -> C:\Projects\dsh-local-workbench
+<LAUNCHER_DIR>      -> <PROJECT_ROOT>\launcher
+<HARNESS_DIR>       -> <PROJECT_ROOT>\harness
+```
+
+## Prerequisites
+
+Install the following on Windows:
+
+- Node.js 24 or newer
+- pnpm
+- Microsoft Edge WebView2 Runtime
+- A DeepSeek API key
+
+Verify the tools:
 
 ```powershell
-cd D:\tools\ds-harness\deepseek-harness-master
+node --version
+pnpm --version
+```
 
+## Installation
+
+### 1. Prepare the local harness
+
+Open PowerShell and go to the harness directory:
+
+```powershell
+cd <HARNESS_DIR>
+```
+
+Install dependencies and build:
+
+```powershell
 pnpm install
 pnpm run build
+```
+
+This creates the built Web frontend and runtime files used by the launcher.
+
+### 2. Configure the launcher to use the local harness
+
+Edit these files in the launcher directory:
+
+```text
+<LAUNCHER_DIR>\start-dsh.vbs
+<LAUNCHER_DIR>\start-dsh.cmd
+```
+
+Replace the harness path with your actual `<HARNESS_DIR>`.
+
+For `start-dsh.vbs`, use a command like:
+
+```text
+cd /d "<HARNESS_DIR>" && pnpm dsh --profile web --port 3080
+```
+
+For `start-dsh.cmd`, use:
+
+```bat
+cd /d "<HARNESS_DIR>"
 pnpm dsh --profile web --port 3080
 ```
 
-Or run the prebuilt desktop launcher:
+### 3. Run the harness manually
 
-```text
-D:\tools\ds-harness\app-v0.1.10\DshWeb.exe
+To test without the desktop shell:
+
+```powershell
+cd <HARNESS_DIR>
+pnpm dsh --profile web --port 3080
 ```
 
-The default Web UI is available at:
+Open:
 
 ```text
 http://127.0.0.1:3080
 ```
 
-## Local Harness Integration
+### 4. Run the desktop launcher
 
-The prebuilt launcher normally starts DeepSeek Harness through a global `dsh`
-command or `npx`. This project changes the launcher scripts to run the local
-source checkout instead.
-
-Modified files:
+Start:
 
 ```text
-app-v0.1.10\start-dsh.vbs
-app-v0.1.10\start-dsh.cmd
+<LAUNCHER_DIR>\DshWeb.exe
 ```
 
-The launch command is now:
+The launcher starts the local harness in the background and opens the Web UI in
+a WebView2 window.
 
-```text
-cd /d "D:\tools\ds-harness\deepseek-harness-master" && pnpm dsh --profile web --port 3080
+## First-Time Web UI Setup
+
+1. Open the Web UI.
+2. Go to `Settings -> Models`.
+3. Enter your DeepSeek API key.
+4. Select `deepseek-v4-flash` or another available model.
+5. Choose a workspace directory.
+6. Start a conversation.
+
+## Using File and Folder Attachments
+
+- Drag a file or folder from Windows Explorer into the Web UI.
+- The attachment appears as a removable chip above the input box.
+- Click the `x` button to remove an attachment before sending.
+- After sending, attachment chips are cleared automatically.
+- Dropping a folder keeps it as one folder item. It is not expanded into many
+  separate file attachments.
+
+## Stopping the Harness
+
+Close the desktop launcher, or run:
+
+```powershell
+Get-NetTCPConnection -LocalPort 3080 -State Listen |
+  Select-Object -ExpandProperty OwningProcess |
+  ForEach-Object { Stop-Process -Id $_ -Force }
 ```
-
-## Drag-and-Drop Improvements
-
-Modified file:
-
-```text
-packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
-```
-
-Changes:
-
-- Native launcher drop events now create visible, removable attachment chips.
-- Browser folder drops no longer recursively expand all files into the dialog.
-- Folder drops add a single folder summary instead of many separate file attachments.
-- Attachment chips are cleared automatically when a message is sent.
 
 ## Token Usage Optimization
 
+The default `standard` agent preset has lower context thresholds.
+
 Modified file:
 
 ```text
-apps/cli/config/agent-presets/standard/agent.cordis.yml
+<HARNESS_DIR>\apps\cli\config\agent-presets\standard\agent.cordis.yml
 ```
 
 Current defaults:
@@ -112,8 +179,7 @@ tool results sooner.
 
 - DeepSeek Harness is currently in developer preview and may introduce
   compatibility-breaking changes.
-- The local working directory contains `node_modules` and build artifacts.
-  Do not commit those to Git.
+- Do not commit `node_modules`, `dist`, `lib`, or other build artifacts to Git.
 - Keep attribution and license notices for the upstream projects.
 
 ## Suggested Topics
