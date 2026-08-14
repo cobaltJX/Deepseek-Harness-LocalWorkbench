@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+lib/
+**/lib/
+bin/
+obj/
+publish/
+*.tsbuildinfo
+*.log
+.dsh/
+.DS_Store
+Thumbs.db
+.credentials.yaml
+*.user
+*.suo
