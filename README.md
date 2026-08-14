@@ -10,6 +10,64 @@ It combines two projects:
 This README is written for first-time users who have not worked with Node.js,
 pnpm, or DeepSeek Harness before. Follow the steps in order.
 
+## Feature Highlights
+
+### Local Desktop Experience
+
+- Run DeepSeek Harness as a native-feeling Windows desktop application.
+- Use a WebView2 window instead of opening a separate browser.
+- Keep the harness and launcher on your own machine.
+
+### Full Coding Agent
+
+- Read, search, and edit files in the selected workspace.
+- Run PowerShell commands and inspect command output.
+- Maintain a persistent conversation with the agent.
+- Use planning, to-do lists, background jobs, subagents, and workflows when
+  they are enabled by the selected preset.
+
+### Flexible Workspace Control
+
+- Choose any local directory as a workspace.
+- Use read-only, workspace-write, or full-access permission modes.
+- Keep sensitive writes behind the approval system, or switch to full access
+  when you trust the current task.
+- Continue working in one workspace while switching to another session.
+
+### Free Multi-Turn Conversation
+
+- Ask follow-up questions without restarting the agent.
+- Let the model inspect its previous work and continue from the current state.
+- Stop, steer, or cancel a running turn from the Web UI.
+
+### Full Takeover of the Coding Loop
+
+- Let the agent take over repeated coding work: inspect files, run commands,
+  modify code, and verify results.
+- Approve or reject sensitive tool calls.
+- Delegate independent subtasks to subagents when needed.
+- Keep the session log durable so work can be resumed later.
+
+### Improved File and Folder Attachments
+
+- Drag files and folders from Windows Explorer into the conversation.
+- Folders are kept as one logical attachment instead of being expanded into
+  many separate files.
+- Attachments appear as removable chips above the input box.
+- Attachment chips are cleared automatically after a message is sent.
+
+### Lower Token Usage in Long Sessions
+
+- Context compaction starts earlier than upstream defaults.
+- Large tool results are trimmed before they are sent back to the model.
+- Long conversations retain less raw history while preserving useful context.
+
+### Configurable Models and Providers
+
+- Use the built-in DeepSeek adapter.
+- Add OpenAI-compatible providers through the Web UI.
+- Choose between different models from the model picker.
+
 ## 1. Requirements
 
 System:
