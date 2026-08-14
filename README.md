@@ -2,105 +2,225 @@
 
 A local Windows desktop workbench for DeepSeek Harness.
 
-It combines a WebView2 desktop launcher with a locally built DeepSeek Harness,
-and includes small UX and token-saving changes for everyday local coding-agent
-workflows.
+It combines two projects:
 
-## Features
+- DeepSeek Harness: the local agent runtime.
+- dsh-launcher: a WebView2 desktop launcher for Windows.
 
-- Local WebView2 desktop shell
-- Drag-and-drop files and folders from Windows Explorer
-- Removable file and folder attachment chips
-- Attachments clear automatically after sending
-- Folder drops stay as one folder item instead of expanding into individual files
-- Lower context-compaction thresholds for long sessions
-- Direct access to a locally built harness for custom plugin development
+This README is written for first-time users who have not worked with Node.js,
+pnpm, or DeepSeek Harness before. Follow the steps in order.
 
-## Assumed Project Layout
+## 1. Requirements
 
-The paths below use placeholders. Replace them with your own locations.
+System:
 
-```text
-<PROJECT_ROOT>\
-  launcher\                  # Prebuilt dsh-launcher release used as the desktop shell
-  harness\                   # Locally built DeepSeek Harness source
-  notes\                     # Optional development notes
-```
+- Windows 10 or Windows 11, 64-bit.
+- A DeepSeek API key.
 
-For example:
+Software:
+
+- Node.js 24 or newer.
+- pnpm.
+- Microsoft Edge WebView2 Runtime.
+
+## 2. Install Node.js
+
+Open this URL:
 
 ```text
-<PROJECT_ROOT>      -> C:\Projects\dsh-local-workbench
-<LAUNCHER_DIR>      -> <PROJECT_ROOT>\launcher
-<HARNESS_DIR>       -> <PROJECT_ROOT>\harness
+https://nodejs.org/
 ```
 
-## Prerequisites
+Download the Windows 64-bit LTS installer. Use Node.js 24 or newer.
 
-Install the following on Windows:
+During installation:
 
-- Node.js 24 or newer
-- pnpm
-- Microsoft Edge WebView2 Runtime
-- A DeepSeek API key
+1. Double-click the downloaded `.msi` file.
+2. Follow the installer steps.
+3. If the installer offers `Add to PATH`, make sure it is selected.
+4. After installation, close every PowerShell window and open a new one.
 
-Verify the tools:
+Verify:
 
 ```powershell
 node --version
+npm --version
+```
+
+If both commands print version numbers, Node.js is installed correctly.
+
+## 3. Install pnpm
+
+Run:
+
+```powershell
+npm install -g pnpm@11.7.0
+```
+
+If you get a permission error, open PowerShell as Administrator and run the
+same command again.
+
+Verify:
+
+```powershell
 pnpm --version
 ```
 
-## Installation
+It should print:
 
-### 1. Prepare the local harness
+```text
+11.7.0
+```
 
-Open PowerShell and go to the harness directory:
+## 4. Install WebView2 Runtime
+
+Most Windows 10 and Windows 11 systems already include WebView2 Runtime.
+
+If `DshWeb.exe` reports that WebView2 is missing, download it from:
+
+```text
+https://developer.microsoft.com/microsoft-edge/webview2/
+```
+
+Install the Evergreen Runtime or Evergreen Bootstrapper.
+
+## 5. Project Layout
+
+The published project normally looks like this:
+
+```text
+DSH-Local-Workbench-Publish\
+  README.md
+  .gitignore
+  NOTICE.md
+  harness\               # DeepSeek Harness source
+  launcher-source\       # dsh-launcher source for rebuilding the shell
+  launcher-bin\          # Prebuilt desktop launcher
+  docs\                  # Plugin map and feasibility notes
+```
+
+Two important placeholders:
+
+- `<HARNESS_DIR>`: the local harness directory, for example
+  `C:\DSH-Local-Workbench-Publish\harness`.
+- `<LAUNCHER_DIR>`: the desktop launcher directory, for example
+  `C:\DSH-Local-Workbench-Publish\launcher-bin`.
+
+The rest of this README uses these placeholders.
+
+## 6. Build The Local Harness
+
+Open PowerShell:
 
 ```powershell
 cd <HARNESS_DIR>
 ```
 
-Install dependencies and build:
+Install dependencies:
 
 ```powershell
 pnpm install
+```
+
+If downloads are slow, use the npm mirror:
+
+```powershell
+pnpm config set registry https://registry.npmmirror.com
+pnpm install
+```
+
+Build:
+
+```powershell
 pnpm run build
 ```
 
-This creates the built Web frontend and runtime files used by the launcher.
+This creates the built Web frontend and runtime files.
 
-### 2. Configure the launcher to use the local harness
+## 7. Configure The Launcher Path
 
-Edit these files in the launcher directory:
+The launcher scripts use a placeholder:
+
+```text
+<HARNESS_DIR>
+```
+
+Replace it with your actual harness directory.
+
+Files to update:
 
 ```text
 <LAUNCHER_DIR>\start-dsh.vbs
 <LAUNCHER_DIR>\start-dsh.cmd
 ```
 
-Replace the harness path with your actual `<HARNESS_DIR>`.
+You can replace the placeholder with PowerShell.
 
-For `start-dsh.vbs`, use a command like:
+First enter the project root:
+
+```powershell
+cd <PROJECT_ROOT>
+```
+
+Assume your actual harness directory is:
 
 ```text
-cd /d "<HARNESS_DIR>" && pnpm dsh --profile web --port 3080
+C:\DSH-Local-Workbench-Publish\harness
 ```
 
-For `start-dsh.cmd`, use:
+Run:
 
-```bat
-cd /d "<HARNESS_DIR>"
-pnpm dsh --profile web --port 3080
+```powershell
+$harnessDir = 'C:\DSH-Local-Workbench-Publish\harness'
+
+$cmd = Join-Path (Get-Location) 'launcher-bin\start-dsh.cmd'
+$vbs = Join-Path (Get-Location) 'launcher-bin\start-dsh.vbs'
+
+(Get-Content $cmd) -replace '<HARNESS_DIR>', $harnessDir | Set-Content $cmd -Encoding ASCII
+(Get-Content $vbs) -replace '<HARNESS_DIR>', $harnessDir | Set-Content $vbs -Encoding ASCII
 ```
 
-### 3. Run the harness manually
+Open both files afterward and verify that the placeholder is replaced with your
+actual path.
 
-To test without the desktop shell:
+## 8. Configure The DeepSeek API Key
+
+There are two options.
+
+### Option A: Configure in the Web UI
+
+After starting the app, open:
+
+```text
+Settings -> Models
+```
+
+Enter your DeepSeek API key and save it.
+
+### Option B: Use an Environment Variable
+
+Run:
+
+```powershell
+$env:DEEPSEEK_API_KEY="sk-your-key"
+```
+
+This only affects the current PowerShell window.
+
+## 9. Start The Project
+
+### Option A: Start the harness manually
 
 ```powershell
 cd <HARNESS_DIR>
+
 pnpm dsh --profile web --port 3080
+```
+
+When the server is ready, you should see:
+
+```text
+dsh web: http://127.0.0.1:3080
 ```
 
 Open:
@@ -109,9 +229,9 @@ Open:
 http://127.0.0.1:3080
 ```
 
-### 4. Run the desktop launcher
+### Option B: Start the desktop launcher
 
-Start:
+Open:
 
 ```text
 <LAUNCHER_DIR>\DshWeb.exe
@@ -120,27 +240,22 @@ Start:
 The launcher starts the local harness in the background and opens the Web UI in
 a WebView2 window.
 
-## First-Time Web UI Setup
+## 10. First-Time Web UI Setup
 
 1. Open the Web UI.
 2. Go to `Settings -> Models`.
 3. Enter your DeepSeek API key.
-4. Select `deepseek-v4-flash` or another available model.
+4. Select a model, for example `deepseek-v4-flash`.
 5. Choose a workspace directory.
 6. Start a conversation.
 
-## Using File and Folder Attachments
+## 11. Stop The Service
 
-- Drag a file or folder from Windows Explorer into the Web UI.
-- The attachment appears as a removable chip above the input box.
-- Click the `x` button to remove an attachment before sending.
-- After sending, attachment chips are cleared automatically.
-- Dropping a folder keeps it as one folder item. It is not expanded into many
-  separate file attachments.
+If you started the desktop launcher, close the window.
 
-## Stopping the Harness
+If you started the service from the command line, press `Ctrl+C`.
 
-Close the desktop launcher, or run:
+You can also run:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 3080 -State Listen |
@@ -148,41 +263,108 @@ Get-NetTCPConnection -LocalPort 3080 -State Listen |
   ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-## Token Usage Optimization
+## 12. Troubleshooting
 
-The default `standard` agent preset has lower context thresholds.
+### `node` is not recognized
 
-Modified file:
+Possible causes:
+
+1. Node.js is not installed.
+2. Node.js was not added to PATH.
+3. The current PowerShell window was opened before Node.js was installed.
+
+Fix:
+
+1. Reinstall Node.js and make sure `Add to PATH` is selected.
+2. Close all PowerShell windows.
+3. Open a new PowerShell window.
+4. Run:
+
+```powershell
+node --version
+```
+
+### `pnpm` is not recognized
+
+Install pnpm:
+
+```powershell
+npm install -g pnpm@11.7.0
+```
+
+Open a new PowerShell window and verify:
+
+```powershell
+pnpm --version
+```
+
+If it is still missing, make sure the user PATH contains:
 
 ```text
-<HARNESS_DIR>\apps\cli\config\agent-presets\standard\agent.cordis.yml
+C:\Users\<your-user-name>\AppData\Roaming\npm
 ```
 
-Current defaults:
+### Port 3080 is already in use
 
-```yaml
-compaction-basic:
-  thresholdRatio: 0.7
-  retainRatio: 0.12
-  maxTokens: 4096
+Stop the process using the port:
 
-tool-result-pruner:
-  thresholdChars: 4096
-  headChars: 2048
-  tailChars: 768
+```powershell
+Get-NetTCPConnection -LocalPort 3080 -State Listen |
+  Select-Object -ExpandProperty OwningProcess |
+  ForEach-Object { Stop-Process -Id $_ -Force }
 ```
 
-These values trigger compaction earlier, keep less raw history, and trim large
-tool results sooner.
+Or use a different port:
 
-## Development Notes
+```powershell
+pnpm dsh --profile web --port 3081
+```
 
-- DeepSeek Harness is currently in developer preview and may introduce
-  compatibility-breaking changes.
-- Do not commit `node_modules`, `dist`, `lib`, or other build artifacts to Git.
-- Keep attribution and license notices for the upstream projects.
+### `pnpm install` times out
 
-## Suggested Topics
+Increase the timeout and lower concurrency:
+
+```powershell
+pnpm config set fetch-timeout 600000
+pnpm config set fetch-retries 5
+pnpm config set fetch-retry-maxtimeout 120000
+pnpm config set network-concurrency 2
+pnpm config set registry https://registry.npmmirror.com
+```
+
+Then run:
+
+```powershell
+pnpm install
+```
+
+### DshWeb.exe cannot find the service
+
+Check both launcher scripts:
+
+```text
+launcher-bin\start-dsh.vbs
+launcher-bin\start-dsh.cmd
+```
+
+Make sure the `<HARNESS_DIR>` placeholder has been replaced with your actual
+harness directory.
+
+## 13. Customizations In This Project
+
+This project is not a plain copy of the upstream projects. It includes:
+
+1. A desktop launcher that points to the local harness instead of a global
+   `dsh` command or npx.
+2. Removable file and folder attachment chips for drag-and-drop from Windows
+   Explorer.
+3. Folder drops kept as one folder item instead of being expanded into many
+   files.
+4. Automatic clearing of attachment chips after sending a message.
+5. Lower context-compaction and tool-result-pruning thresholds to reduce token
+   usage in long sessions.
+
+## 14. Suggested GitHub Topics
 
 ```text
 deepseek
