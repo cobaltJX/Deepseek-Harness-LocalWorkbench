@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dsh-launcher per-machine MSI installer (WiX Toolset v5, schema v4).
+
+  Design (security-first):
+  - Scope="perMachine" + elevated: install/repair/remove run with admin (UAC
+    prompt) and register in HKLM. Elevation is REQUIRED for a correct uninstall
+    on disks whose root Config.Msi ACL (created by the MSI service as SYSTEM
+    only) blocks the non-elevated client from setting security on rollback
+    files (.rbf), which otherwise surfaces as error 1926 / error 5 during
+    uninstall (see docs/DETAILS.md FAQ). Elevated transactions match the
+    BUILTIN\Administrators ACE on Config.Msi, so uninstall is clean.
+  - Default folder: %ProgramFiles%\dsh-launcher; the wizard still allows a
+    custom folder (WIXUI_INSTALLDIR), e.g. an existing E:\ directory.
+  - Autostart is a plain HKCU\...\Run value (removed on uninstall).
+  - Desktop / Start Menu shortcuts and uninstall shortcut are created for the
+    installing user (public folders) and removed on uninstall.
+  - UpgradeCode is fixed so future versions upgrade in place via MajorUpgrade.
+    NOTE: per-user installs of 0.1.5 and earlier are in HKCU; a per-machine
+    upgrade cannot see them (MSI searches only the same context), so upgrading
+    from a per-user build requires uninstalling the old version first.
+
+  UI: a simple wizard (Welcome → License → Options → Ready → Install → Finish)
+  with exactly three checkboxes (autostart / desktop shortcut / start menu
+  shortcut), no feature tree, with a modern install-folder page.
+
+  Build (see scripts/build-release.ps1):
+    wix build installer\product.wxs -arch x64 -d ProductVersion=<x.y.z> -d SourceDir=<assemble dir> -o dist\dsh-launcher-<version>.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="dsh-launcher"
+           Manufacturer="dsh-launcher contributors"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="3B29D055-E142-43BD-ADA8-C5377D11BD7E"
+           Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of dsh-launcher is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="dsh-launcher">
+        <Directory Id="RuntimesDir" Name="runtimes">
+          <Directory Id="WinX64Dir" Name="win-x64">
+            <Directory Id="NativeDir" Name="native" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="dsh-launcher" />
+    </StandardDirectory>
+
+    <!-- Main is always installed; the three optional features map to the wizard checkboxes
+         (Level elements turn the feature off when the matching checkbox is unchecked). -->
+    <Feature Id="Main" Title="dsh-launcher" Description="dsh-launcher application files" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="UninstallShortcut" />
+      <ComponentRef Id="CurrentProductCodeReg" />
+      <ComponentRef Id="DisplayIconReg" />
+    </Feature>
+    <Feature Id="AutoStart" Title="开机自启" Description="登录时静默启动 dsh 服务（HKCU Run，卸载时移除）" Level="1">
+      <!-- 注意：MSI 条件中非空字符串"0"会被当作 true，`NOT AUTO_START_OPTION` 对默认值 "0"
+           不生效；必须用显式数值比较（勾选=1 才安装）。默认不勾选 = 默认不安装自启（省内存）。 -->
+      <Level Value="0" Condition="AUTO_START_OPTION &lt;&gt; 1" />
+      <ComponentRef Id="AutoStartEntry" />
+    </Feature>
+    <Feature Id="DesktopShortcut" Title="桌面快捷方式" Description="在桌面创建 dsh-launcher 快捷方式" Level="1">
+      <Level Value="0" Condition="NOT DESKTOP_SHORTCUT_OPTION" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <Feature Id="MenuShortcut" Title="开始菜单快捷方式" Description="在开始菜单创建 dsh-launcher 快捷方式" Level="1">
+      <Level Value="0" Condition="NOT MENU_SHORTCUT_OPTION" />
+      <ComponentRef Id="ProgramMenuShortcut" />
+    </Feature>
+
+    <!-- checkbox 默认值：开机自启默认【不勾选】（dsh 服务内存占用相对较大，非必要不推荐开启）；
+         快捷方式默认勾选；WIXUI_INSTALLDIR 指向目录选择页 -->
+    <Property Id="AUTO_START_OPTION" Value="0" Secure="yes" />
+    <Property Id="DESKTOP_SHORTCUT_OPTION" Value="1" Secure="yes" />
+    <Property Id="MENU_SHORTCUT_OPTION" Value="1" Secure="yes" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" Secure="yes" />
+
+    <!-- 应用图标（小鲸鱼）：显示在快捷方式与"设置 → 应用"卸载条目上。
+         exe 本身也编译了该图标（ApplicationIcon），这里显式引用保证一致。 -->
+    <Icon Id="AppIcon" SourceFile="$(sys.SOURCEFILEDIR)..\src\DshShell\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <!-- 安装期禁用回滚的额外保险（本包仅 7 个小文件，代价可接受）。
+         卸载期的 1926/错误5 由 per-machine 提权解决：提权事务匹配 Config.Msi 上
+         BUILTIN\Administrators 的 ACL，回滚文件（.rbf）的安全设置不会失败。 -->
+    <Property Id="DISABLEROLLBACK" Value="1" Secure="yes" />
+
+    <UI>
+      <ui:WixUI Id="WixUI_SimpleCheckbox" />
+    </UI>
+
+    <!-- 现代文件夹选择器（Type-38 立即上下文外部 exe，绕开"远程上下文崩溃"）：
+         弹 Windows 11 新版文件夹对话框（IFileDialog）；选择结果写到
+         HKCU\Software\dsh-launcher\InstallDir，由 ReadPickedFolder（VBScript 自定义
+         动作，立即上下文）读回并设置 _BrowseProperty（PICKED_OK=1），再由浏览按钮
+         的 SetTargetPath 应用到安装目录。用户取消时 picker 会删除该注册表值，
+         PICKED_OK 保持未定义，路径不变。
+         注意：不能用标准 AppSearch 回读——它在安装序列开始时已调度执行，DoAction
+         不会重跑标准动作，属性永远读不到（v0.1.13 实测"选了不生效"的根因）。 -->
+    <Binary Id="FolderPickerExe" SourceFile="$(sys.SOURCEFILEDIR)FolderPicker\out\FolderPicker.exe" />
+    <CustomAction Id="LaunchModernFolderPicker" BinaryRef="FolderPickerExe"
+                  ExeCommand="&quot;[WIXUI_INSTALLDIR]&quot;"
+                  Execute="immediate" Return="ignore" />
+    <CustomAction Id="ReadPickedFolder" Script="vbscript"
+                  ScriptSourceFile="$(sys.SOURCEFILEDIR)ReadPickedFolder.vbs"
+                  Execute="immediate" Return="ignore" />
+  </Package>
+
+  <Fragment>
+    <!-- license page shown by the WixUI wizard (resolved relative to this file) -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+
+    <ComponentGroup Id="AppFiles">
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\DshWeb.exe" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\WebView2Loader.dll" />
+      </Component>
+      <Component Directory="NativeDir" Guid="*">
+        <File Source="$(var.SourceDir)\runtimes\win-x64\native\WebView2Loader.dll" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\start-dsh.vbs" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\start-dsh.cmd" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\dsh-web.cmd" />
+      </Component>
+      <Component Directory="INSTALLFOLDER" Guid="*">
+        <File Source="$(var.SourceDir)\uninstall-autostart.cmd" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- 当前产品代码：壳程序据此识别"正在运行的这个版本"，升级清理旧版时永不误卸自己。
+         安装（per-machine，提权）写 HKLM，卸载时随组件删除。 -->
+    <Component Id="CurrentProductCodeReg" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM"
+                     Key="Software\dsh-launcher"
+                     Name="CurrentProductCode"
+                     Value="[ProductCode]"
+                     Type="string"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- 卸载条目图标（设置 → 应用 显示）：MSI 的 ARPPRODUCTICON 只影响旧控制面板，
+         新"设置 → 应用"读注册表 DisplayIcon 值，这里显式指向 exe（其自带小鲸鱼图标）。 -->
+    <Component Id="DisplayIconReg" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[ProductCode]"
+                     Name="DisplayIcon"
+                     Value="[INSTALLFOLDER]DshWeb.exe"
+                     Type="string"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- per-user autostart: HKCU Run -> wscript start-dsh.vbs (silent service start at logon) -->
+    <Component Id="AutoStartEntry" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKCU"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="dsh-launcher"
+                     Value='wscript.exe "[INSTALLFOLDER]start-dsh.vbs"'
+                     Type="string"
+                     KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="*">
+      <Shortcut Id="DesktopShortcutLnk"
+                Name="dsh-launcher"
+                Description="DeepSeek Harness Windows launcher"
+                Target="[INSTALLFOLDER]DshWeb.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\dsh-launcher\Shortcuts"
+                     Name="desktop"
+                     Value="1"
+                     Type="integer"
+                     KeyPath="yes" />
+    </Component>
+
+    <Component Id="ProgramMenuShortcut" Directory="ProgramMenuDir" Guid="*">
+      <Shortcut Id="ProgramMenuShortcutLnk"
+                Name="DeepSeek Harness"
+                Description="DeepSeek Harness Windows launcher"
+                Target="[INSTALLFOLDER]DshWeb.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuDir" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\dsh-launcher\Shortcuts"
+                     Name="startmenu"
+                     Value="1"
+                     Type="integer"
+                     KeyPath="yes" />
+    </Component>
+
+    <!-- one-click uninstall from the Start Menu (always installed) -->
+    <Component Id="UninstallShortcut" Directory="ProgramMenuDir" Guid="*">
+      <Shortcut Id="UninstallShortcutLnk"
+                Name="卸载 dsh-launcher"
+                Description="Uninstall dsh-launcher"
+                Target="[System64Folder]msiexec.exe"
+                Arguments="/x [ProductCode]"
+                Icon="AppIcon" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\dsh-launcher\Shortcuts"
+                     Name="uninstall"
+                     Value="1"
+                     Type="integer"
+                     KeyPath="yes" />
+    </Component>
+  </Fragment>
+
+  <!-- 简单向导：Welcome → License → Options(三个勾选框) → ChooseFolder(自定义目录) → Ready → Install → Finish；
+       已安装时走 MaintenanceWelcome → MaintenanceType(修复/移除)。
+       Id 带 _X64 后缀（<ui:WixUI> 引用时会按构建架构追加后缀）。 -->
+  <Fragment>
+    <UI Id="WixUI_SimpleCheckbox_X64">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <!-- 自定义页使用的现代字体 -->
+      <TextStyle Id="DshUIFont" FaceName="Segoe UI" Size="9" />
+      <TextStyle Id="DshUIFontBold" FaceName="Segoe UI" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="WelcomeDlg" />
+      <DialogRef Id="LicenseAgreementDlg" />
+      <DialogRef Id="OptionsDlg" />
+      <DialogRef Id="ChooseFolderDlg" />
+      <DialogRef Id="BrowseDlg" />
+      <DialogRef Id="InvalidDirDlg" />
+      <DialogRef Id="VerifyReadyDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ExitDialog" />
+      <DialogRef Id="MaintenanceWelcomeDlg" />
+      <DialogRef Id="MaintenanceTypeDlg" />
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Print" Event="DoAction" Value="WixUIPrintEula_X64" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="OptionsDlg" Condition="LicenseAccepted = &quot;1&quot;" />
+
+      <Publish Dialog="OptionsDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" Condition="1" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ChooseFolderDlg" Order="1" Condition="NOT Installed" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2" Condition="Installed AND NOT PATCH" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="Installed AND PATCH" />
+
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+
+      <Property Id="ARPNOMODIFY" Value="1" />
+    </UI>
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
+
+  <!-- 说明：现代文件夹选择器（自定义 CA：DTF/Type-38 exe）因本环境远程上下文崩溃而移除；
+       浏览按钮改用 WiX 标准 BrowseDlg（内置对话框）。注意必须按标准 WixUI_InstallDir
+       初始化 _BrowseProperty：点浏览时先把当前安装目录复制给 _BrowseProperty，再
+       SpawnDialog，否则 BrowseDlg 内部目录控件无法初始化（MSI 报错 2819，v0.1.11 的复现）。
+       CustomAction/Binary 代码保留在 git 历史（installer/Picker）供其他环境复用。 -->
+
+  <!-- 安装选项对话框：三个勾选框（Segoe UI 风格） -->
+  <Fragment>
+    <UI>
+      <Dialog Id="OptionsDlg" Width="370" Height="270" Title="[ProductName] — 安装选项">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="yes" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15" Transparent="yes" Text="{\DshUIFontBold}安装选项" />
+        <Control Id="Description" Type="Text" X="15" Y="23" Width="340" Height="15" Transparent="yes" Text="{\DshUIFont}选择要启用的功能" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步(&amp;B)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="下一步(&amp;N)">
+          <Publish Event="NewDialog" Value="ChooseFolderDlg" Condition="1" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消">
+          <Publish Event="EndDialog" Value="Return" Condition="1" />
+        </Control>
+        <Control Id="AutoStart" Type="CheckBox" X="25" Y="85" Width="320" Height="34" Property="AUTO_START_OPTION" CheckBoxValue="1" Text="{\DshUIFont}开机自启（登录时静默启动 dsh 服务；&#xA;内存占用相对较大，非必要不推荐开启）" />
+        <Control Id="DesktopShortcut" Type="CheckBox" X="25" Y="130" Width="320" Height="17" Property="DESKTOP_SHORTCUT_OPTION" CheckBoxValue="1" Text="{\DshUIFont}创建桌面快捷方式" />
+        <Control Id="MenuShortcut" Type="CheckBox" X="25" Y="155" Width="320" Height="17" Property="MENU_SHORTCUT_OPTION" CheckBoxValue="1" Text="{\DshUIFont}创建开始菜单快捷方式" />
+        <Control Id="Note" Type="Text" X="25" Y="180" Width="320" Height="40" Text="{\DshUIFont}卸载只删除本应用的 7 个文件，不会删除目录里的其他内容（与 DeepSeek Harness 共用目录也安全）。" />
+      </Dialog>
+    </UI>
+  </Fragment>
+
+  <!-- 选择安装目录：路径输入 + 标准 WiX 浏览对话框（BrowseDlg） -->
+  <Fragment>
+    <UI>
+      <Dialog Id="ChooseFolderDlg" Width="370" Height="270" Title="[ProductName] — 选择安装目录">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="yes" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15" Transparent="yes" Text="{\DshUIFontBold}选择安装目录" />
+        <Control Id="Description" Type="Text" X="15" Y="23" Width="340" Height="15" Transparent="yes" Text="{\DshUIFont}选择 dsh-launcher 的安装位置" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="FolderLabel" Type="Text" X="20" Y="78" Width="330" Height="15" Text="{\DshUIFont}安装到：" />
+        <Control Id="Folder" Type="PathEdit" X="20" Y="95" Width="262" Height="19" Property="WIXUI_INSTALLDIR" Indirect="yes" />
+        <!-- 浏览按钮：现代化文件夹选择器（Type-38 立即上下文外部 exe + VBScript 自定义
+             动作回读，不用标准 AppSearch——它只在序列开始执行一次，DoAction 不重跑）。
+             事件链：① 把当前安装目录初始化给 _BrowseProperty ② 启动现代选择器
+             （写 HKCU\Software\dsh-launcher\InstallDir）③ VBScript 读回：有选择则
+             设 _BrowseProperty=新路径 且 PICKED_OK=1 ④ 应用（仅 PICKED_OK 时）。
+             取消时 picker 删除注册表值，PICKED_OK 未定义，路径保持不变。 -->
+        <Control Id="Browse" Type="PushButton" X="286" Y="94" Width="64" Height="21" Text="浏览(&amp;R)...">
+          <Publish Property="_BrowseProperty" Value="[WIXUI_INSTALLDIR]" Order="1" Condition="1" />
+          <Publish Event="DoAction" Value="LaunchModernFolderPicker" Order="2" Condition="1" />
+          <Publish Event="DoAction" Value="ReadPickedFolder" Order="3" Condition="1" />
+          <Publish Event="SetTargetPath" Value="[_BrowseProperty]" Order="4" Condition="PICKED_OK" />
+        </Control>
+        <Control Id="Note" Type="Text" X="20" Y="130" Width="330" Height="45" Text="{\DshUIFont}默认安装到 %ProgramFiles%\dsh-launcher（需管理员确认）。可在此直接输入或粘贴其他路径，如已有的 E:\ 目录。卸载只删除本应用的 7 个文件，不会删除目录中的其他内容。" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="上一步(&amp;B)">
+          <Publish Event="NewDialog" Value="OptionsDlg" Condition="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="下一步(&amp;N)">
+          <Publish Event="SetTargetPath" Value="[WIXUI_INSTALLDIR]" Order="1" Condition="1" />
+          <Publish Event="DoAction" Value="WixUIValidatePath_X64" Order="2" Condition="NOT WIXUI_DONTVALIDATEPATH" />
+          <Publish Event="SpawnDialog" Value="InvalidDirDlg" Order="3" Condition="NOT WIXUI_DONTVALIDATEPATH AND WIXUI_INSTALLDIR_VALID&lt;&gt;&quot;1&quot;" />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Order="4" Condition="WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="取消">
+          <Publish Event="EndDialog" Value="Return" Condition="1" />
+        </Control>
+      </Dialog>
+    </UI>
+  </Fragment>
+</Wix>
