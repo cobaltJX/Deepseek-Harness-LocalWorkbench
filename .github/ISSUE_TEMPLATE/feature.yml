@@ -1,0 +1,66 @@
+name: 功能需求
+description: 提交一个研发任务（必须写清验收标准）
+title: "[M] "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        缺少验收标准的任务不会被排期。标题格式：`[M2] 动词 + 对象`。
+  - type: dropdown
+    id: module
+    attributes:
+      label: 所属模块
+      options:
+        - M0 项目治理
+        - M1 启动器
+        - M2 Harness 运行时
+        - M3 构建与打包
+        - M4 文档与发布
+    validations:
+      required: true
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与目标
+      description: 为什么做，解决什么问题，对应 BASELINE 的哪一条
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 功能范围
+      value: |
+        - 本次要做：
+        - 本次不做：
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 必须可演示、可测试、可复现
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: verifier
+    attributes:
+      label: 验收人
+      description: 填 GitHub 用户名
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      options:
+        - P0
+        - P1
+        - P2
+        - P3
+    validations:
+      required: true
