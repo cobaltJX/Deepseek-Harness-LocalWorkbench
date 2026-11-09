@@ -1,0 +1,7 @@
+# 语法：最后匹配的一行优先；用户名必须真实存在，否则该行被静默忽略
+
+*                       @cobaltJX
+/docs/                  @cobaltJX
+/.github/               @cobaltJX
+/launcher-source/src/   @cobaltJX
+/launcher-source/scripts/ @cobaltJX
